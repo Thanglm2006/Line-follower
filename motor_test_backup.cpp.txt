@@ -1,0 +1,86 @@
+#include <Arduino.h>
+// ==== CẤU HÌNH CHÂN ĐỘNG CƠ A ====
+const int PWMA = 25;
+const int AIN1 = 26;
+const int AIN2 = 27;
+
+// ==== CẤU HÌNH CHÂN ĐỘNG CƠ B ====
+const int PWMB = 14;
+const int BIN1 = 12;
+const int BIN2 = 13;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Khai báo Output cho Động cơ A
+  pinMode(PWMA, OUTPUT);
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+
+  // Khai báo Output cho Động cơ B
+  pinMode(PWMB, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+
+  // Thiết lập chiều quay (Cả 2 cùng tiến)
+  // Nếu động cơ nào quay ngược, bạn đổi HIGH/LOW của riêng động cơ đó
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+
+  Serial.println("=== KHOI DONG BAI TEST KEP 2 DONG CO ===");
+  delay(3000); // Cho bạn 3 giây để chuẩn bị giữ chặt khung xe/động cơ
+}
+
+void loop() {
+  Serial.println(">> Dang tang toc ca 2 dong co...");
+  
+  // Tăng tốc dần theo nấc (bước nhảy 15)
+  for (int speed = 0; speed <= 255; speed += 15) {
+    analogWrite(PWMA, speed);
+    analogWrite(PWMB, speed);
+    
+    // Quy đổi PWM (0-255) sang RPM (0-1000)
+    int estimatedRPM = map(speed, 0, 255, 0, 1000);
+    
+    Serial.print("Muc PWM: ");
+    Serial.print(speed);
+    Serial.print(" | Uoc luong toc do: ~");
+    Serial.print(estimatedRPM);
+    Serial.println(" RPM");
+    
+    delay(400); 
+  }
+
+  // Đảm bảo cả 2 đều ở công suất tối đa
+  analogWrite(PWMA, 255);
+  analogWrite(PWMB, 255);
+  
+  Serial.println(">> MAX SPEED (1000 RPM)! Dang test dong xa toi da trong 5 giay...");
+  delay(5000); 
+
+  Serial.println(">> Dang giam toc...");
+  // Giảm tốc dần dần
+  for (int speed = 255; speed >= 0; speed -= 15) {
+    analogWrite(PWMA, speed);
+    analogWrite(PWMB, speed);
+    
+    int estimatedRPM = map(speed, 0, 255, 0, 1000);
+    
+    Serial.print("Muc PWM: ");
+    Serial.print(speed);
+    Serial.print(" | Uoc luong toc do: ~");
+    Serial.print(estimatedRPM);
+    Serial.println(" RPM");
+    
+    delay(400);
+  }
+
+  // Tắt hẳn cả 2
+  analogWrite(PWMA, 0);
+  analogWrite(PWMB, 0);
+  Serial.println(">> Dung dong co. Dong co an toan. Nghi 4 giay.\n");
+  delay(4000);
+}
