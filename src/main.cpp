@@ -1,4 +1,7 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include "Adafruit_VL53L0X.h"
+
 
 // 8 line sensors connected from D26 up to EN on the ESP32 (left side of typical dev kit)
 // The pins in order are: 26, 25, 33, 32, 35, 34, 39 (VN), 36 (VP)
@@ -19,16 +22,18 @@ const int PWMB = 13;
 const int BIN1 = 5;
 const int BIN2 = 23;
 
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+const int OBSTACLE_THRESHOLD = 40; // 4cm = 40mm
+
+
 // --- PID PARAMETERS ---
-// Tweak these to make the car run smoother. 
-// Start with small Kp, then increase. Finally add some Kd to reduce oscillation.
-// Hạ thấp Kp và Kd vì động cơ 1000rpm rất mạnh, tránh xe bị lắc (oscillation)
-float Kp = 0.08; // Hệ số tỉ lệ (Giảm từ 0.04 xuống 0.02)
-float Kd = 0.4;  // Hệ số vi phân (Giảm từ 0.2 xuống 0.1)
+float Kp = 0.15; // Increased for high speed
+float Kd = 1.0;  // Increased to dampen oscillations
 float Ki = 0.0;
 
-int baseSpeed = 120; // Base speed (0 - 255)
+int baseSpeed = 100 ; // Speed during curves
 int lastError = 0;
+
 
 void setupMotors() {
   pinMode(AIN1, OUTPUT);
@@ -93,6 +98,48 @@ void setMotorLeft(int speed) {
 #endif
 }
 
+// Function to turn around 180 degrees when obstacle is detected
+void turnAround() {
+  Serial.println("OBSTACLE DETECTED! Turning around...");
+  
+  // Stop motors
+  setMotorLeft(0);
+  setMotorRight(0);
+  delay(300);
+  
+  // Spin in place
+  setMotorLeft(-180);
+  setMotorRight(180);
+  
+  // Small delay to get off the current line position
+  delay(500); 
+  
+  // Continue turning until middle sensors detect the line
+  bool lineFound = false;
+  unsigned long startTurn = millis();
+  while (!lineFound) {
+    // Timeout to prevent infinite spinning if line is lost (3 seconds)
+    if (millis() - startTurn > 3000) break;
+
+    int val3 = analogRead(sensorPins[3]);
+    int val4 = analogRead(sensorPins[4]);
+    
+    // Check if middle sensors detect black line
+    if (val3 <= (minValues[3] + 400) || val4 <= (minValues[4] + 400)) {
+      lineFound = true;
+    }
+    delay(5);
+  }
+  
+  // Stop and stabilize
+  setMotorLeft(0);
+  setMotorRight(0);
+  delay(1000);
+  
+  lastError = 0; // Reset PID error
+}
+
+
 void setup() {
   Serial.begin(115200);
   Serial.println("=== KHOI DONG ROBOT DO LINE ===");
@@ -103,12 +150,36 @@ void setup() {
   
   setupMotors();
   
+  // Initialize VL53L0X
+  Wire.begin(21, 22);
+  if (!lox.begin()) {
+    Serial.println("Failed to boot VL53L0X sensor!");
+  } else {
+    Serial.println("VL53L0X OK");
+  }
+  
   // Wait 2 seconds before start moving
   delay(2000); 
 }
 
+
 void loop() {
+  /* --- OBSTACLE SENSOR (DISABLED FOR SPEED) ---
+  VL53L0X_RangingMeasurementData_t measure;
+  lox.rangingTest(&measure, false);
+  
+  if (measure.RangeStatus <= 4) {
+    int distance = measure.RangeMilliMeter - 20;
+    if (distance > 0 && distance <= OBSTACLE_THRESHOLD) {
+      turnAround();
+      return;
+    }
+  }
+  */
+
   int rawValues[numSensors];
+
+
   bool isBlack[numSensors];
 
   int sum = 0;
@@ -166,33 +237,26 @@ void loop() {
   // --- TỐC ĐỘ LINH HOẠT (DYNAMIC SPEED BOOST) ---
   int currentBaseSpeed;
   if (abs(error) < 400 && count > 0) {
-    // Khi xe đang đi thẳng (lỗi nhỏ < 400), tăng tốc độ lên để chạy nhanh hơn
-    currentBaseSpeed = 180; // Bạn có thể tăng lên 200-255 nếu muốn nhanh hơn nữa
+    // Max speed on straights
+    currentBaseSpeed = 250; 
   } else {
-    // Khi xe đang vào cua hoặc lệch nhiều, dùng tốc độ cơ bản thấp để an toàn
+    // Controlled speed on curves
     currentBaseSpeed = baseSpeed; 
   }
+
 
   // Tính toán tốc độ motor dựa trên tốc độ cơ bản hiện tại và giá trị PID (motorPwm)
   int speedLeft = currentBaseSpeed - motorPwm;
   int speedRight = currentBaseSpeed + motorPwm;
 
   // Constrain speeds. Allowing negative speeds lets the car turn in place (sharp corners)
-  speedLeft = constrain(speedLeft, -150, 255);
-  speedRight = constrain(speedRight, -150, 255);
+  speedLeft = constrain(speedLeft, -255, 255);
+  speedRight = constrain(speedRight, -255, 255);
 
-  // Apply to motors
+
   setMotorLeft(speedLeft);
   setMotorRight(speedRight);
 
-  // Debug (uncomment to see the values in serial monitor)
-  /*
-  Serial.print("Pos: "); Serial.print(count > 0 ? sum/count : -1);
-  Serial.print(" | Err: "); Serial.print(error);
-  Serial.print(" | L: "); Serial.print(speedLeft);
-  Serial.print(" | R: "); Serial.println(speedRight);
-  */
-  
-  // Sample every 10ms (~100Hz)
-  delay(10);
+  // Minimal delay for maximum sampling rate
+  delay(1);
 }
